@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 测试数据库
+  postgres-test:
+    image: postgres:15
+    container_name: rayneo_postgres_test
+    environment:
+      POSTGRES_DB: rayneo_test
+      POSTGRES_USER: rayneo_user
+      POSTGRES_PASSWORD: rayneo_pass
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    networks:
+      - rayneo_test_network
+
+  # Redis 测试缓存
+  redis-test:
+    image: redis:7-alpine
+    container_name: rayneo_redis_test
+    ports:
+      - "6380:6379"
+    networks:
+      - rayneo_test_network
+
+  # 后端测试服务
+  backend-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rayneo_backend_test
+    ports:
+      - "8001:8000"
+    environment:
+      - DATABASE_URL=postgresql://rayneo_user:rayneo_pass@postgres-test:5432/rayneo_test
+      - REDIS_URL=redis://redis-test:6379
+      - TESTING=true
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      - postgres-test
+      - redis-test
+    volumes:
+      - ./backend:/app
+    networks:
+      - rayneo_test_network
+    command: >
+      sh -c "
+        echo 'Waiting for database...' &&
+        sleep 10 &&
+        echo 'Running tests...' &&
+        python -m pytest tests/ -v --cov=app --cov-report=html --cov-report=term
+      "
+
+  # 前端测试服务
+  frontend-test:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.test
+    container_name: rayneo_frontend_test
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - CI=true
+      - REACT_APP_API_BASE_URL=http://backend-test:8000
+    networks:
+      - rayneo_test_network
+    command: npm test -- --coverage --watchAll=false
+
+volumes:
+  postgres_test_data:
+
+networks:
+  rayneo_test_network:
+    driver: bridge
